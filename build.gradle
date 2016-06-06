@@ -1,0 +1,27 @@
+group 'com.amannmalik.robot'
+version = '1.0-SNAPSHOT'
+
+apply plugin: "java"
+apply plugin: "maven"
+
+sourceCompatibility = 1.8
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+
+    compile "org.slf4j:slf4j-api:1.7.12"
+    compile "org.glassfish:javax.json:1.0.4"
+
+    compile "org.glassfish.tyrus:tyrus-client:1.11"
+    compile "org.glassfish.tyrus:tyrus-container-jdk-client:1.11"
+
+    testCompile "junit:junit:4.12"
+}
+
+wrapper {
+    gradleVersion = "2.10"
+}
