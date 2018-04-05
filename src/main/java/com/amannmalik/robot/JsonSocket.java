@@ -9,7 +9,6 @@ import javax.websocket.*;
 import java.io.IOException;
 import java.io.StringReader;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -18,20 +17,29 @@ import java.util.function.Consumer;
 /**
  * @author Amann Malik
  */
-abstract class JsonSocket {
+public class JsonSocket {
 
-    private Session session;
-    private URI serverUri;
-    private long connectionTimeoutMilliseconds;
+    private final Consumer<JsonObject> messageHandler;
+    private final BiConsumer<Integer, String> closeHandler;
 
-    public final void connect() {
+    private Session session = null;
 
-        disconnect(1000, "client is reconnecting");
+    public JsonSocket(Consumer<JsonObject> messageHandler, BiConsumer<Integer, String> closeHandler) {
+        this.messageHandler = messageHandler;
+        this.closeHandler = closeHandler;
+    }
+
+    public void open(URI serverEndpointUri, long timeoutMilliseconds) {
+
+        if (session != null) {
+            throw new IllegalStateException("attempted to open unclosed socket");
+        }
 
         final CountDownLatch latch = new CountDownLatch(1);
 
-        final Consumer<JsonObject> messageHandler = this::handleMessage;
-        final BiConsumer<Integer, String> closeHandler = this::handleDisconnect;
+        final Consumer<JsonObject> messageHandler = this.messageHandler;
+        final BiConsumer<Integer, String> closeHandler = this.closeHandler;
+        final Runnable clearSessionTask = this::clearSession;
         Endpoint endpoint = new Endpoint() {
 
             @Override
@@ -53,6 +61,7 @@ abstract class JsonSocket {
             public void onClose(Session session, CloseReason closeReason) {
                 int closeCode = closeReason.getCloseCode().getCode();
                 String closeReasonPhrase = closeReason.getReasonPhrase();
+                clearSessionTask.run();
                 closeHandler.accept(closeCode, closeReasonPhrase);
             }
 
@@ -67,9 +76,10 @@ abstract class JsonSocket {
         ClientEndpointConfig endpointConfig = ClientEndpointConfig.Builder.create().build();
 
         ClientManager client = ClientManager.createClient("org.glassfish.tyrus.container.jdk.client.JdkClientContainer");
+
         try {
-            this.session = client.connectToServer(endpoint, endpointConfig, serverUri);
-            latch.await(connectionTimeoutMilliseconds, TimeUnit.SECONDS);
+            this.session = client.connectToServer(endpoint, endpointConfig, serverEndpointUri);
+            latch.await(timeoutMilliseconds, TimeUnit.MILLISECONDS);
         } catch (DeploymentException | IOException | InterruptedException e) {
             // either a network connectivity or config problem
             throw new RuntimeException(e);
@@ -77,28 +87,38 @@ abstract class JsonSocket {
 
     }
 
-    protected abstract void handleMessage(JsonObject message);
+    public void close(int closeCode, String closeReasonPhrase) {
 
-    protected abstract void handleDisconnect(int closeCode, String closeReasonPhrase);
+        if (this.session == null) {
+            throw new IllegalStateException("attempted to close already closed socket");
+        }
 
-    protected void sendMessage(JsonObject message) {
+        if (this.session.isOpen()) {
+            CloseReason.CloseCode code = CloseReason.CloseCodes.getCloseCode(closeCode);
+            CloseReason closeReason = new CloseReason(code, closeReasonPhrase);
+            try {
+                this.session.close(closeReason);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            this.session = null;
+        }
+
+    }
+
+    public void send(JsonObject message) {
+
+        if (session == null || !session.isOpen()) {
+            throw new IllegalStateException("attempted to send message on closed socket");
+        }
+
         String serializedMessage = message.toString();
         session.getAsyncRemote().sendText(serializedMessage);
     }
 
-    public void disconnect(int closeCode, String closeReasonPhrase) {
-        if(this.session != null) {
-            if(this.session.isOpen()) {
-                CloseReason.CloseCode code = CloseReason.CloseCodes.getCloseCode(closeCode);
-                CloseReason closeReason = new CloseReason(code, closeReasonPhrase);
-                try {
-                    this.session.close(closeReason);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-            this.session = null;
-        }
+    private void clearSession() {
+        this.session = null;
     }
 
 }

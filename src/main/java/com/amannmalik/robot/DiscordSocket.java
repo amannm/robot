@@ -5,137 +5,197 @@ import org.slf4j.LoggerFactory;
 import sun.plugin.dom.exception.InvalidStateException;
 
 import javax.json.Json;
+import javax.json.JsonArray;
 import javax.json.JsonObject;
 import javax.json.JsonObjectBuilder;
-import javax.json.JsonValue;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 /**
  * @author Amann Malik
  */
-public class DiscordSocket extends JsonSocket {
+public class DiscordSocket {
 
     //TODO: properly think about the concurrency situations
 
 
-    public enum Status {
-        CONNECTING,
-        IDENTIFYING,
-        RESUMING,
-        READY,
-        FAILED
-    }
-
-    private AtomicReference<Status> currentStatus = new AtomicReference<>(Status.CONNECTING);
-
-
     private static final Logger LOG = LoggerFactory.getLogger(DiscordSocket.class);
 
-    private static final String DISCORD_GATEWAY_URL = "https://discordapp.com/api/gateway/bot";
+    private static final String DISCORD_GATEWAY_RESOLUTION_URL = "https://discordapp.com/api/gateway/bot";
+
+    private static final long SOCKET_CONNECTION_TIMEOUT = 5000L;
 
     private final String token;
+    private final JsonSocket socket;
 
-    private AtomicReference<String> sessionId = new AtomicReference<>(null);
+    private URI currentServerUri;
+
+    private PeriodicTask heartbeatTask = new PeriodicTask();
+    private int currentHeartbeatInterval = -1;
+    private boolean waitingForHeartbeatAcknowledgement = false;
+
     private AtomicInteger currentSequenceNumber = new AtomicInteger(-1);
-    private AtomicBoolean waitingForHeartbeatAcknowledgement = new AtomicBoolean(true);
+
+    private final CyclicBarrier heartbeatLatch = new CyclicBarrier(2);
+    private final CyclicBarrier sessionLatch = new CyclicBarrier(2);
 
 
+    private DiscordGatewaySession currentSession;
 
     public DiscordSocket(String token) {
-        super(fetchServerUrl(token), 5L);
         this.token = token;
+        this.socket = new JsonSocket(this::handleMessage, this::handleDisconnect);
+    }
+
+    public void connect() {
+        LOG.info("initializing connection...");
+
+        this.currentServerUri = fetchServerUrl(token);
+
+        this.socket.open(this.currentServerUri, SOCKET_CONNECTION_TIMEOUT);
+        LOG.info("establishing heartbeat...");
+        try {
+            heartbeatLatch.await(5000L, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | TimeoutException | BrokenBarrierException e) {
+            throw new RuntimeException(e);
+        }
+        heartbeatLatch.reset();
+
+        if(this.currentSession == null) {
+            LOG.info("creating new session...");
+            sendIdentify();
+        } else {
+            LOG.info("resuming existing session...");
+            sendResume(this.currentSession.id);
+        }
+        try {
+            sessionLatch.await(5000L, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | BrokenBarrierException | TimeoutException e) {
+            throw new RuntimeException(e);
+        }
+        sessionLatch.reset();
+
+        LOG.info("connection established");
     }
 
 
-    @Override
-    protected void handleMessage(JsonObject object) {
-        int opCode = object.getInt("op");
-        JsonValue eventData = object.get("d");
-        switch (opCode) {
-            case 0:
-                //Event Dispatch
-                int sequenceNumber = object.getInt("s");
-                currentSequenceNumber.set(sequenceNumber);
-                String eventName = object.getString("t");
-                processEvent(eventName, eventData);
-                break;
-            case 1:
-                //Heartbeat Request
-                heartbeatTask.start(currentHeartbeatInterval.get(), this::sendHeartbeat);
-                break;
-            case 7:
-                //Reconnect Request
-                disconnect(1000, "server requested disconnection and reconnection");
-                break;
-            case 9:
-                //Invalid Session
-                //TODO: actually understand this behavior
-
-                boolean newSessionRequired = !object.containsKey("d") || object.isNull("d") || !object.getBoolean("d");
-                switch(currentStatus.get()) {
-                    case IDENTIFYING:
-                        break;
-                    case RESUMING:
-                    case READY:
-                        if(newSessionRequired) {
-                        } else {
-                            currentStatus.set(Status.RESUMING);
-                            sendResume();
-                        }
-                        break;
-                    default:
-                        throw new InvalidStateException("received invalid session event in an unexpected status");
-                }
-                if()) {
-                    sessionId.set(null);
-                }
-                break;
-            case 10:
-                //Hello
-                JsonObject eventDataObject = (JsonObject) eventData;
-                int heartbeatIntervalMilliseconds = eventDataObject.getInt("heartbeat_interval");
-                currentHeartbeatInterval.set(heartbeatIntervalMilliseconds);
-                heartbeatTask.start(currentHeartbeatInterval.get(), this::sendHeartbeat);
-                if(sessionId.get() == null) {
-                    sendIdentify();
-                    currentStatus.compareAndSet(Status.CONNECTING, Status.IDENTIFYING);
-                } else {
-                    sendResume();
-                    currentStatus.compareAndSet(Status.CONNECTING, Status.RESUMING);
-                }
-                break;
-            case 11:
-                //Heartbeat ACK
-                if(!waitingForHeartbeatAcknowledgement.compareAndSet(true, false)) {
-                    throw new InvalidStateException("received two heartbeat acknowledgements within a single heartbeat period");
-                };
-                break;
-            default:
-                break;
+    //TODO: interrupt and cleanup any  waiting threads
+    public void disconnect() {
+        this.socket.close(1000, "client requested disconnection");
+        if(this.currentSession != null && this.currentSession.isReady()) {
+            this.currentSession.setReady(false);
         }
     }
 
-    private void resetConnectionState() {
-        this.currentStatus.set(Status.CONNECTING);
-        this.heartbeatTask.stop();
-        this.currentHeartbeatInterval.set(-1);
-        this.waitingForHeartbeatAcknowledgement.set(false);
+
+    private void handleMessage(JsonObject message) {
+        int opCode = message.getInt("op");
+        switch (opCode) {
+            case 0: {
+                //Event Dispatch
+                int sequenceNumber = message.getInt("s");
+                currentSequenceNumber.set(sequenceNumber);
+                String eventName = message.getString("t");
+                JsonObject eventData = message.getJsonObject("d");
+                switch (eventName) {
+                    case "READY": {
+                        if (currentSession != null) {
+                            throw new IllegalStateException("existing session state encountered during READY event");
+                        }
+                        String sessionId = eventData.getString("session_id");
+                        currentSession = new DiscordGatewaySession(sessionId);
+                        List<String> guilds = eventData.getJsonArray("guilds").stream().map(v->(JsonObject)v).map(o->o.getString("id")).collect(Collectors.toList());
+                        currentSession.setGuilds(guilds);
+                        currentSession.setReady(true);
+                        try {
+                            sessionLatch.await(1L, TimeUnit.SECONDS);
+                        } catch (InterruptedException | TimeoutException | BrokenBarrierException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    break;
+                    case "RESUMED": {
+                        if (currentSession == null || currentSession.isReady()) {
+                            throw new IllegalStateException("unexpected session state encountered during RESUMED event");
+                        }
+                        currentSession.setReady(true);
+                        try {
+                            sessionLatch.await(1L, TimeUnit.SECONDS);
+                        } catch (InterruptedException | TimeoutException | BrokenBarrierException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    break;
+                }
+            }
+            break;
+            case 1: {
+                //Heartbeat Request
+                //TODO: properly understand protocol behavior. here we are resetting the heartbeat timer to 0 then immediately responding with a heartbeat
+                heartbeatTask.start(this.currentHeartbeatInterval, this::sendHeartbeat);
+                sendHeartbeat();
+            }
+            break;
+            case 7: {
+                //Reconnect Request
+                socket.close(1000, "server requested client reconnect");
+                socket.open(this.currentServerUri, SOCKET_CONNECTION_TIMEOUT);
+            }
+            break;
+            case 9: {
+                //TODO: all this shit
+                //Invalid Session (3)
+                if (currentSession == null) {
+                    // IDENTIFY failure
+                    throw new UnsupportedOperationException("IDENTIFY command failed");
+                } else {
+                    //TODO: do we always need to check if "d" exists?
+                    boolean isResumable = message.containsKey("d") && message.getBoolean("d");
+                    if (!currentSession.isReady()) {
+                        // RESUME failure
+                        throw new UnsupportedOperationException("RESUME command failed");
+                    } else {
+                        // out of process session invalidation
+                        throw new UnsupportedOperationException("active session was invalidated");
+                    }
+                }
+            }
+            //break;
+            case 10: {
+                //Hello
+                //TODO: properly understand protocol behavior. here we are waiting the entire interval before sending our initial heartbeat
+                JsonObject eventData = message.getJsonObject("d");
+                this.currentHeartbeatInterval = eventData.getInt("heartbeat_interval");
+                heartbeatTask.start(this.currentHeartbeatInterval, this::sendHeartbeat);
+                try {
+                    heartbeatLatch.await(1L, TimeUnit.SECONDS);
+                } catch (InterruptedException | TimeoutException | BrokenBarrierException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            break;
+            case 11: {
+                //Heartbeat ACK
+                if (waitingForHeartbeatAcknowledgement) {
+                    waitingForHeartbeatAcknowledgement = false;
+                } else {
+                    throw new InvalidStateException("received unexpected heartbeat acknowledgement");
+                }
+            }
+            break;
+            default:
+                throw new RuntimeException("received unexpected op code: " + opCode);
+        }
+
     }
 
-    private void resetSessionState() {
-        this.sessionId.set(null);
-        this.currentSequenceNumber.set(-1);
-    }
-
-    @Override
-    protected void handleDisconnect(int closeCode, String closeReasonPhrase) {
-        resetConnectionState();
+    private void handleDisconnect(int closeCode, String closeReasonPhrase) {
         switch (closeCode) {
             case 4000: //unknown error -- We're not sure what went wrong. Try reconnecting?
                 break;
@@ -163,46 +223,23 @@ public class DiscordSocket extends JsonSocket {
                 break;
         }
         //TODO: proper handling/recovery
+        LOG.info("socket connection closed by server: " + closeReasonPhrase);
         throw new RuntimeException(closeReasonPhrase);
     }
 
 
-    private void processEvent(String eventName, JsonValue data) {
-        switch(eventName) {
-            case "READY":
-                JsonObject object = (JsonObject) data;
-                String sessionIdString = object.getString("session_id");
-                sessionId.set(sessionIdString);
-                if(!currentStatus.compareAndSet(Status.IDENTIFYING, Status.READY)) {
-                    throw new IllegalStateException("received READY event while not in IDENTIFYING state");
-                }
-                break;
-            case "RESUMED":
-                if(!currentStatus.compareAndSet(Status.RESUMING, Status.READY)) {
-                    throw new IllegalStateException("received RESUMED event while not in RESUMING state");
-                }
-                break;
-            default:
-                break;
-        }
-    }
-
-    private void sendResume() {
-
-        if(this.sessionId.get() == null) {
-            throw new IllegalStateException("cannot resume non-existent session");
-        }
+    private void sendResume(String sessionId) {
 
         JsonObject object = Json.createObjectBuilder()
                 .add("op", 6)
                 .add("d", Json.createObjectBuilder()
                         .add("token", this.token)
-                        .add("session_id", this.sessionId.get())
+                        .add("session_id", sessionId)
                         .add("seq", this.currentSequenceNumber.get())
                         .build()
                 ).build();
 
-        sendMessage(object);
+        socket.send(object);
     }
 
     private void sendIdentify() {
@@ -210,39 +247,40 @@ public class DiscordSocket extends JsonSocket {
         JsonObject object = Json.createObjectBuilder()
                 .add("op", 2)
                 .add("d", Json.createObjectBuilder()
-                    .add("token", this.token)
-                    .add("properties", Json.createObjectBuilder()
-                            .add("$os","linux")
-                            .add("$browser","robot")
-                            .add("$device","robot")
-                            .build()
-                    ).build()
-            ).build();
+                        .add("token", this.token)
+                        .add("properties", Json.createObjectBuilder()
+                                .add("$os", "linux")
+                                .add("$browser", "robot")
+                                .add("$device", "robot")
+                                .build()
+                        ).build()
+                ).build();
 
-        sendMessage(object);
+        socket.send(object);
     }
 
     private void sendHeartbeat() {
-        if(!waitingForHeartbeatAcknowledgement.compareAndSet(true, false)) {
-            disconnect(1008, "no heartbeat acknowledgement received within heartbeat interval");
-            throw new RuntimeException("no heartbeat acknowledgement received within heartbeat interval");
+        if (waitingForHeartbeatAcknowledgement) {
+            this.socket.close(1008, "heartbeat period elapsed without receiving heartbeat ACK");
+            //TODO: better handling
+            throw new RuntimeException("heartbeat period elapsed without receiving heartbeat ACK");
         }
 
         JsonObjectBuilder builder = Json.createObjectBuilder();
         builder.add("op", 1);
-        if(currentSequenceNumber.get() == -1) {
+        if (currentSequenceNumber.get() == -1) {
             builder.addNull("d");
         } else {
             builder.add("d", currentSequenceNumber.get());
         }
-        sendMessage(builder.build());
+        this.socket.send(builder.build());
     }
 
     private static URI fetchServerUrl(String token) {
         HashMap<String, String> headers = new HashMap<>(1);
         headers.put("Authorization", "Bot " + token);
         try {
-            JsonObject metadata = Util.fetchResource(DISCORD_GATEWAY_URL, headers);
+            JsonObject metadata = Util.fetchResource(DISCORD_GATEWAY_RESOLUTION_URL, headers);
             String websocketUrl = metadata.getString("url");
             int shardCount = metadata.getInt("shards");
             //TODO: enable sharding use cases?

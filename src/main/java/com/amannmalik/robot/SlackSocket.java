@@ -16,36 +16,41 @@ import java.util.function.Consumer;
 /**
  * @author Amann Malik
  */
-public class SlackMessageGateway extends JsonSocket {
+public class SlackSocket {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SlackMessageGateway.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SlackSocket.class);
 
     private static final String SLACK_RTM_START_URL = "https://slack.com/api/rtm.start";
 
+    private final JsonSocket socket = new JsonSocket(this::handleMessage, this::handleDisconnect);
     private final String token;
     private final Consumer<SlackMessageEvent> messageHandler;
 
     private final AtomicInteger messageId = new AtomicInteger(1);
     private final ConcurrentHashMap<Integer, Consumer<Boolean>> messageBuffer = new ConcurrentHashMap<>();
 
-    public SlackMessageGateway(String token) {
-        this(token, message->{});
+    public SlackSocket(String token) {
+        this(token, (event)->{});
     }
 
-    public SlackMessageGateway(String token, Consumer<SlackMessageEvent> messageHandler) {
-        super(fetchServerEndpointUrl(token), 5L);
+    public SlackSocket(String token, Consumer<SlackMessageEvent> messageHandler) {
         this.token = token;
         this.messageHandler = messageHandler;
     }
 
+    public void connect() {
+        URI uri = fetchServerEndpointUrl(this.token);
+        this.socket.open(uri, 5000L);
+    }
 
-    @Override
-    public void close() {
+
+
+    public void disconnect() {
         for (Integer id : messageBuffer.keySet()) {
             Consumer<Boolean> remove = messageBuffer.remove(id);
             remove.accept(false);
         }
-        super.close();
+        this.socket.close(1000, "client requested disconnection");
     }
 
     public void sendMessage(String channel, String message, Consumer<Boolean> sentHandler) {
@@ -57,12 +62,12 @@ public class SlackMessageGateway extends JsonSocket {
                 .add("text", message)
                 .build();
         messageBuffer.put(id, sentHandler);
-        super.sendMessage(object);
+        this.socket.send(object);
     }
 
 
-    @Override
-    protected void handleMessage(JsonObject message) {
+
+    private void handleMessage(JsonObject message) {
         LOG.debug("{}", message.toString());
 
         if (message.containsKey("type")) {
@@ -95,8 +100,7 @@ public class SlackMessageGateway extends JsonSocket {
         }
     }
 
-    @Override
-    protected void handleDisconnect(int closeCode, String closeReasonPhrase) {
+    private void handleDisconnect(int closeCode, String closeReasonPhrase) {
         //TODO: does Slack put any useful information here?
     }
 
