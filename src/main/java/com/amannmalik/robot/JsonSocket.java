@@ -18,11 +18,15 @@ import java.util.function.Consumer;
 /**
  * @author Amann Malik
  */
-abstract class JsonSocket implements AutoCloseable {
+abstract class JsonSocket {
 
-    private final Session session;
+    private Session session;
+    private URI serverUri;
+    private long connectionTimeoutMilliseconds;
 
-    public JsonSocket(URI serverUrl, long openTimeoutSeconds) {
+    public final void connect() {
+
+        disconnect(1000, "client is reconnecting");
 
         final CountDownLatch latch = new CountDownLatch(1);
 
@@ -64,8 +68,8 @@ abstract class JsonSocket implements AutoCloseable {
 
         ClientManager client = ClientManager.createClient("org.glassfish.tyrus.container.jdk.client.JdkClientContainer");
         try {
-            this.session = client.connectToServer(endpoint, endpointConfig, serverUrl);
-            latch.await(openTimeoutSeconds, TimeUnit.SECONDS);
+            this.session = client.connectToServer(endpoint, endpointConfig, serverUri);
+            latch.await(connectionTimeoutMilliseconds, TimeUnit.SECONDS);
         } catch (DeploymentException | IOException | InterruptedException e) {
             // either a network connectivity or config problem
             throw new RuntimeException(e);
@@ -82,16 +86,19 @@ abstract class JsonSocket implements AutoCloseable {
         session.getAsyncRemote().sendText(serializedMessage);
     }
 
-    @Override
-    public void close() {
-        if (session != null && session.isOpen()) {
-            try {
-                session.close();
-            } catch (IOException ex) {
-                throw new RuntimeException(ex);
+    public void disconnect(int closeCode, String closeReasonPhrase) {
+        if(this.session != null) {
+            if(this.session.isOpen()) {
+                CloseReason.CloseCode code = CloseReason.CloseCodes.getCloseCode(closeCode);
+                CloseReason closeReason = new CloseReason(code, closeReasonPhrase);
+                try {
+                    this.session.close(closeReason);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
             }
-        } else {
-            throw new RuntimeException("session isn't open");
+            this.session = null;
         }
     }
+
 }

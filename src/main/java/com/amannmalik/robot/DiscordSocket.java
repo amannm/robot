@@ -4,7 +4,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sun.plugin.dom.exception.InvalidStateException;
 
-import javax.json.*;
+import javax.json.Json;
+import javax.json.JsonObject;
+import javax.json.JsonObjectBuilder;
+import javax.json.JsonValue;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -16,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * @author Amann Malik
  */
-public class DiscordMessageGateway extends JsonSocket {
+public class DiscordSocket extends JsonSocket {
 
     //TODO: properly think about the concurrency situations
 
@@ -32,21 +35,19 @@ public class DiscordMessageGateway extends JsonSocket {
     private AtomicReference<Status> currentStatus = new AtomicReference<>(Status.CONNECTING);
 
 
-    private static final Logger LOG = LoggerFactory.getLogger(DiscordMessageGateway.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DiscordSocket.class);
 
     private static final String DISCORD_GATEWAY_URL = "https://discordapp.com/api/gateway/bot";
 
     private final String token;
 
-    private PeriodicTask heartbeatTask = new PeriodicTask();
     private AtomicReference<String> sessionId = new AtomicReference<>(null);
     private AtomicInteger currentSequenceNumber = new AtomicInteger(-1);
-    private AtomicInteger currentHeartbeatInterval = new AtomicInteger(-1);
     private AtomicBoolean waitingForHeartbeatAcknowledgement = new AtomicBoolean(true);
 
 
 
-    public DiscordMessageGateway(String token) {
+    public DiscordSocket(String token) {
         super(fetchServerUrl(token), 5L);
         this.token = token;
     }
