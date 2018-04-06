@@ -27,7 +27,8 @@ public class DiscordSocket {
 
     private static final Logger LOG = LoggerFactory.getLogger(DiscordSocket.class);
 
-    private static final String DISCORD_GATEWAY_RESOLUTION_URL = "https://discordapp.com/api/gateway/bot";
+    private static final String DISCORD_API_BASE_URL = "https://discordapp.com/api";
+    private static final String DISCORD_GATEWAY_RESOLUTION_URL = DISCORD_API_BASE_URL + "/gateway/bot";
 
     private static final long SOCKET_CONNECTION_TIMEOUT = 5000L;
 
@@ -90,6 +91,25 @@ public class DiscordSocket {
         this.socket.close(1000, "client requested disconnection");
         if(this.currentSession != null && this.currentSession.isReady()) {
             this.currentSession.setReady(false);
+        }
+    }
+
+    public void createMessage(String channelId, String text) {
+
+        String url = DISCORD_API_BASE_URL + "/channels/"+channelId+"/messages";
+
+        JsonObject content = Json.createObjectBuilder()
+                .add("content", text)
+                .build();
+
+        HashMap<String, String> headers = new HashMap<>(2);
+        headers.put("Authorization", "Bot " + token);
+        headers.put("User-Agent", "Bot");
+        try {
+            JsonObject metadata = Util.postResource(url, headers, content);
+            //TODO: use this for something
+        } catch (IOException ex) {
+            throw new RuntimeException(ex);
         }
     }
 
@@ -197,6 +217,8 @@ public class DiscordSocket {
 
     private void handleDisconnect(int closeCode, String closeReasonPhrase) {
         switch (closeCode) {
+            case 1000:
+                return;
             case 4000: //unknown error -- We're not sure what went wrong. Try reconnecting?
                 break;
             case 4001: //unknown opcode -- You sent an invalid Gateway opcode or an invalid payload for an opcode. Don't do that!
@@ -277,14 +299,15 @@ public class DiscordSocket {
     }
 
     private static URI fetchServerUrl(String token) {
-        HashMap<String, String> headers = new HashMap<>(1);
+        HashMap<String, String> headers = new HashMap<>(2);
         headers.put("Authorization", "Bot " + token);
+        headers.put("User-Agent", "Bot");
         try {
             JsonObject metadata = Util.fetchResource(DISCORD_GATEWAY_RESOLUTION_URL, headers);
             String websocketUrl = metadata.getString("url");
             int shardCount = metadata.getInt("shards");
             //TODO: enable sharding use cases?
-            return new URI(websocketUrl + "?v=6&encoding=json");
+            return new URI(websocketUrl);
         } catch (IOException | URISyntaxException ex) {
             throw new RuntimeException(ex);
         }

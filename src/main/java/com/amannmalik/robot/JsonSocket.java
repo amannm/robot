@@ -68,6 +68,7 @@ public class JsonSocket {
             @Override
             public void onError(Session session, Throwable thr) {
                 //TODO: properly handle
+                Throwable shit = thr;
                 throw new RuntimeException(thr);
             }
 

@@ -36,8 +36,6 @@ class Util {
     }
 
     static JsonObject postResource(String locationString, Map<String, String> headers, JsonObject payload) throws IOException {
-
-
         byte[] body = getJsonBytes(payload);
         URL url = tryConstructUrl(locationString);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -66,9 +64,8 @@ class Util {
     static JsonObject fetchResource(String locationString, Map<String, String> headers) throws IOException {
         URL url = tryConstructUrl(locationString);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("GET");
         headers.forEach(connection::setRequestProperty);
-        connection.setDoInput(true);
+        connection.setRequestMethod("GET");
         return handleJsonResponse(connection);
 
     }
