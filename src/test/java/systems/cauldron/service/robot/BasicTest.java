@@ -1,18 +1,8 @@
-package com.amannmalik.robot;
+package systems.cauldron.service.robot;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import javax.json.Json;
-import javax.json.JsonObject;
-import javax.json.JsonReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.time.Instant;
-import java.util.Map;
 
 /**
  * @author Amann Malik
@@ -36,8 +26,7 @@ public class BasicTest {
     }
 
 
-
-    //@Test
+    @Test
     public void something() throws InterruptedException {
         SlackSocket client = new SlackSocket(SLACK_BOT_USER_TOKEN);
         client.connect();
@@ -46,7 +35,7 @@ public class BasicTest {
         client.disconnect();
     }
 
-    //@Test
+    @Test
     public void react() throws InterruptedException {
 
         int secondsPart = 1456353715;

@@ -1,11 +1,9 @@
-package com.amannmalik.robot;
+package systems.cauldron.service.robot;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import sun.plugin.dom.exception.InvalidStateException;
 
 import javax.json.Json;
-import javax.json.JsonArray;
 import javax.json.JsonObject;
 import javax.json.JsonObjectBuilder;
 import java.io.IOException;
@@ -13,7 +11,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -205,7 +206,7 @@ public class DiscordSocket {
                 if (waitingForHeartbeatAcknowledgement) {
                     waitingForHeartbeatAcknowledgement = false;
                 } else {
-                    throw new InvalidStateException("received unexpected heartbeat acknowledgement");
+                    throw new RuntimeException("received unexpected heartbeat acknowledgement");
                 }
             }
             break;

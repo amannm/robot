@@ -1,10 +1,14 @@
-package com.amannmalik.robot;
+package systems.cauldron.service.robot;
 
 import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
 import javax.json.JsonWriter;
-import java.io.*;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.StringWriter;
+import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -12,7 +16,6 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * @author Amann Malik
@@ -52,7 +55,7 @@ class Util {
         return handleJsonResponse(connection);
     }
 
-    static byte[] getJsonBytes(JsonObject payload) {
+    private static byte[] getJsonBytes(JsonObject payload) {
         StringWriter stringWriter = new StringWriter();
         JsonWriter jsonWriter = Json.createWriter(stringWriter);
         jsonWriter.writeObject(payload);
@@ -74,10 +77,12 @@ class Util {
         int responseCode = connection.getResponseCode();
         switch (responseCode) {
             case 200:
-                try (InputStream inputStream = connection.getInputStream()) {
-                    try (JsonReader parser = Json.createReader(inputStream)) {
-                        return parser.readObject();
+                try (JsonReader parser = Json.createReader(connection.getInputStream())) {
+                    JsonObject jsonObject = parser.readObject();
+                    if (jsonObject == null) {
+                        throw new RuntimeException("empty response");
                     }
+                    return jsonObject;
                 }
             default:
                 throw new RuntimeException("invalid response " + responseCode);

@@ -1,11 +1,17 @@
-package com.amannmalik.robot;
+package systems.cauldron.service.robot;
 
 import org.glassfish.tyrus.client.ClientManager;
 
 import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
-import javax.websocket.*;
+import javax.websocket.ClientEndpointConfig;
+import javax.websocket.CloseReason;
+import javax.websocket.DeploymentException;
+import javax.websocket.Endpoint;
+import javax.websocket.EndpointConfig;
+import javax.websocket.MessageHandler;
+import javax.websocket.Session;
 import java.io.IOException;
 import java.io.StringReader;
 import java.net.URI;

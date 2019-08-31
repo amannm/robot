@@ -1,4 +1,4 @@
-package com.amannmalik.robot;
+package systems.cauldron.service.robot;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,6 +107,9 @@ public class SlackSocket {
     private static URI fetchServerEndpointUrl(String token) {
         try {
             JsonObject metadata = Util.fetchResource(SLACK_RTM_START_URL + "?token=" + token);
+            if (!metadata.containsKey("url")) {
+                throw new RuntimeException(metadata.toString());
+            }
             String websocketUrl = metadata.getString("url");
             return new URI(websocketUrl);
         } catch (IOException | URISyntaxException ex) {

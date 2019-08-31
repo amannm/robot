@@ -1,28 +1,45 @@
-group 'com.amannmalik.robot'
-version = '1.0-SNAPSHOT'
+plugins {
+    id 'java'
+}
 
-apply plugin: "java"
-apply plugin: "maven"
+group 'systems.cauldron'
+version '1.0-SNAPSHOT'
 
-sourceCompatibility = 1.8
+sourceCompatibility = 11
 
 repositories {
-    mavenLocal()
     mavenCentral()
 }
 
 dependencies {
 
+    //logging
     compile "org.slf4j:slf4j-api:1.7.25"
     compile "org.slf4j:slf4j-simple:1.7.25"
+
+    //json serialization
     compile "org.glassfish:javax.json:1.0.4"
 
+    //websocket client
     compile "org.glassfish.tyrus:tyrus-client:1.11"
     compile "org.glassfish.tyrus:tyrus-container-jdk-client:1.11"
 
-    testCompile "junit:junit:4.12"
+    //unit testing framework
+    testCompile group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: '5+'
+    testCompile group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: '5+'
+
 }
 
-wrapper {
-    gradleVersion = "2.10"
+test {
+    useJUnitPlatform()
+}
+
+compileJava {
+    inputs.property("moduleName", 'systems.cauldron.service.robot')
+    doFirst {
+        options.compilerArgs = [
+                '--module-path', classpath.asPath,
+        ]
+        classpath = files()
+    }
 }
