@@ -1,5 +1,6 @@
 package systems.cauldron.service.robot;
 
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -25,9 +26,7 @@ public class PeriodicTask {
     }
 
     public void start(int intervalMilliseconds, Runnable nextTask) {
-
         stop();
-
         currentSchedule.set(scheduledExecutorService.scheduleAtFixedRate(() -> {
             Future previousTask = currentTask.get();
             if (previousTask.isDone()) {
@@ -37,10 +36,7 @@ public class PeriodicTask {
     }
 
     public void stop() {
-        ScheduledFuture<?> scheduledFuture = currentSchedule.get();
-        if (scheduledFuture != null) {
-            scheduledFuture.cancel(true);
-        }
+        Optional.ofNullable(currentSchedule.get()).ifPresent(it -> it.cancel(true));
     }
 
 

@@ -1,7 +1,7 @@
 open module systems.cauldron.service.robot {
-    requires slf4j.api;
-    requires javax.json;
-    requires javax.websocket.api;
     requires tyrus.client;
+    requires java.json;
+    requires org.slf4j;
+    requires jakarta.websocket.api;
     exports systems.cauldron.service.robot;
 }

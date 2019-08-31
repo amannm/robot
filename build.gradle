@@ -14,15 +14,15 @@ repositories {
 dependencies {
 
     //logging
-    compile "org.slf4j:slf4j-api:1.7.25"
-    compile "org.slf4j:slf4j-simple:1.7.25"
+    compile "org.slf4j:slf4j-api:1+"
+    compile "org.slf4j:slf4j-simple:1+"
 
     //json serialization
-    compile "org.glassfish:javax.json:1.0.4"
+    compile group: 'org.glassfish', name: 'jakarta.json', version: '1+'
 
     //websocket client
-    compile "org.glassfish.tyrus:tyrus-client:1.11"
-    compile "org.glassfish.tyrus:tyrus-container-jdk-client:1.11"
+    compile "org.glassfish.tyrus:tyrus-client:1+"
+    compile "org.glassfish.tyrus:tyrus-container-jdk-client:1+"
 
     //unit testing framework
     testCompile group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: '5+'
