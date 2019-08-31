@@ -78,11 +78,7 @@ class Util {
         switch (responseCode) {
             case 200:
                 try (JsonReader parser = Json.createReader(connection.getInputStream())) {
-                    JsonObject jsonObject = parser.readObject();
-                    if (jsonObject == null) {
-                        throw new RuntimeException("empty response");
-                    }
-                    return jsonObject;
+                    return parser.readObject();
                 }
             default:
                 throw new RuntimeException("invalid response " + responseCode);
